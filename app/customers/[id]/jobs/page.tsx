@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
 type PermissionRow = {
@@ -9,8 +9,9 @@ type PermissionRow = {
   is_allowed: boolean
 }
 
-type JobDashboardRow = {
-  job_id: string
+type CustomerJobRow = {
+  id?: string
+  job_id?: string
   tenant_id: string
   customer_id: string
   customer_name: string | null
@@ -23,20 +24,9 @@ type JobDashboardRow = {
   created_at: string | null
 }
 
-type JobGroup =
-  | 'active'
-  | 'awaitingReport'
-  | 'readyForInvoice'
-  | 'invoiced'
-  | 'arOpen'
-  | 'closed'
-  | 'all'
-
 type SortMode =
   | 'newest'
   | 'oldest'
-  | 'customerAsc'
-  | 'customerDesc'
   | 'stageAsc'
   | 'stageDesc'
   | 'serialAsc'
@@ -44,20 +34,9 @@ type SortMode =
   | 'internalWoAsc'
   | 'internalWoDesc'
 
-const ACTIVE_PRODUCTION_STAGES = [
-  'INTAKE',
-  'INSPECTION',
-  'STRIP',
-  'CUTDOWN',
-  'BUILD',
-  'PRE_HARDMETAL_MACHINE',
-  'PRE_HARDMETAL_INSPECTION',
-  'HARD_METAL',
-  'FINAL_MACHINE',
-  'PROFILE_GRIND',
-  'INTERNAL_QC',
-  'THIRD_PARTY_QC',
-]
+function getJobId(job: CustomerJobRow) {
+  return String(job.job_id ?? job.id ?? '').trim()
+}
 
 function formatTimestamp(value: string | null) {
   if (!value) return 'Unknown'
@@ -88,12 +67,14 @@ function safeText(value: string | null) {
   return value?.toLowerCase() ?? ''
 }
 
-export default function JobsPage() {
+export default function CustomerJobsPage() {
   const router = useRouter()
+  const params = useParams<{ id: string | string[] }>()
+
+  const customerId = Array.isArray(params.id) ? params.id[0] : params.id
 
   const [permissions, setPermissions] = useState<PermissionRow[]>([])
-  const [jobs, setJobs] = useState<JobDashboardRow[]>([])
-  const [activeGroup, setActiveGroup] = useState<JobGroup>('active')
+  const [jobs, setJobs] = useState<CustomerJobRow[]>([])
   const [searchDraft, setSearchDraft] = useState('')
   const [search, setSearch] = useState('')
   const [sortMode, setSortMode] = useState<SortMode>('newest')
@@ -110,7 +91,7 @@ export default function JobsPage() {
 
   const canViewJobs = allowedPermissions.has('view_jobs')
 
-  const loadJobs = async () => {
+  const loadCustomerJobs = async () => {
     setLoading(true)
     setError('')
 
@@ -141,84 +122,52 @@ export default function JobsPage() {
       return
     }
 
+    if (!customerId) {
+      setError('Missing customer id.')
+      setJobs([])
+      setLoading(false)
+      return
+    }
+
     const { data, error: jobsError } = await supabase.rpc(
-      'get_jobs_dashboard_v1'
+      'get_customer_jobs_v1',
+      {
+        p_customer_id: customerId,
+      }
     )
 
     if (jobsError) {
-      setError(jobsError.message)
+      setError(`Customer jobs load failed: ${jobsError.message}`)
       setJobs([])
     } else {
-      setJobs((data ?? []) as JobDashboardRow[])
+      setJobs((data ?? []) as CustomerJobRow[])
     }
 
     setLoading(false)
   }
 
   useEffect(() => {
-    void loadJobs()
-  }, [])
+    if (!customerId) return
 
-  const activeProductionJobs = useMemo(() => {
-    return jobs.filter((job) =>
-      ACTIVE_PRODUCTION_STAGES.includes(job.internal_status)
-    )
-  }, [jobs])
+    void loadCustomerJobs()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customerId])
 
-  const awaitingReportJobs = useMemo(() => {
-    return jobs.filter(
-      (job) => job.internal_status === 'AWAITING_THIRD_PARTY_REPORT'
-    )
-  }, [jobs])
-
-  const readyForInvoiceJobs = useMemo(() => {
-    return jobs.filter((job) => job.internal_status === 'READY_FOR_INVOICE')
-  }, [jobs])
-
-  const invoicedJobs = useMemo(() => {
-    return jobs.filter((job) => job.internal_status === 'INVOICED')
-  }, [jobs])
-
-  const arOpenJobs = useMemo(() => {
-    return jobs.filter((job) => job.internal_status === 'AR_OPEN')
-  }, [jobs])
-
-  const closedJobs = useMemo(() => {
-    return jobs.filter((job) => job.internal_status === 'CLOSED')
-  }, [jobs])
-
-  const groupedJobs = useMemo(() => {
-    if (activeGroup === 'active') return activeProductionJobs
-    if (activeGroup === 'awaitingReport') return awaitingReportJobs
-    if (activeGroup === 'readyForInvoice') return readyForInvoiceJobs
-    if (activeGroup === 'invoiced') return invoicedJobs
-    if (activeGroup === 'arOpen') return arOpenJobs
-    if (activeGroup === 'closed') return closedJobs
-    return jobs
-  }, [
-    activeGroup,
-    activeProductionJobs,
-    awaitingReportJobs,
-    readyForInvoiceJobs,
-    invoicedJobs,
-    arOpenJobs,
-    closedJobs,
-    jobs,
-  ])
+  const customerName = jobs[0]?.customer_name ?? 'Customer'
 
   const searchedJobs = useMemo(() => {
     const term = search.trim().toLowerCase()
 
-    if (!term) return groupedJobs
+    if (!term) return jobs
 
-    return groupedJobs.filter((job) => {
+    return jobs.filter((job) => {
       const searchable = [
         job.internal_work_order_number,
         job.customer_work_order_number,
         job.customer_name,
         job.serial_number,
         job.internal_status,
-        job.job_id,
+        getJobId(job),
       ]
         .filter(Boolean)
         .join(' ')
@@ -226,7 +175,7 @@ export default function JobsPage() {
 
       return searchable.includes(term)
     })
-  }, [groupedJobs, search])
+  }, [jobs, search])
 
   const visibleJobs = useMemo(() => {
     const sorted = [...searchedJobs]
@@ -238,14 +187,6 @@ export default function JobsPage() {
 
       if (sortMode === 'oldest') {
         return timeValue(a.created_at) - timeValue(b.created_at)
-      }
-
-      if (sortMode === 'customerAsc') {
-        return safeText(a.customer_name).localeCompare(safeText(b.customer_name))
-      }
-
-      if (sortMode === 'customerDesc') {
-        return safeText(b.customer_name).localeCompare(safeText(a.customer_name))
       }
 
       if (sortMode === 'stageAsc') {
@@ -282,24 +223,6 @@ export default function JobsPage() {
     return sorted
   }, [searchedJobs, sortMode])
 
-  const activeTitle = useMemo(() => {
-    if (activeGroup === 'active') return 'Active Production'
-    if (activeGroup === 'awaitingReport') return 'Awaiting Third Party Report'
-    if (activeGroup === 'readyForInvoice') return 'Ready for Invoice'
-    if (activeGroup === 'invoiced') return 'Invoiced'
-    if (activeGroup === 'arOpen') return 'AR Open'
-    if (activeGroup === 'closed') return 'Closed'
-    return 'All Jobs'
-  }, [activeGroup])
-
-  const groupButtonClass = (group: JobGroup) => {
-    return `rounded-full border px-3 py-1.5 text-xs font-semibold ${
-      activeGroup === group
-        ? 'border-blue-500 bg-blue-950 text-white'
-        : 'border-gray-700 bg-gray-900 text-gray-300 hover:border-gray-500 hover:text-white'
-    }`
-  }
-
   const submitSearch = () => {
     setSearch(searchDraft)
   }
@@ -309,19 +232,25 @@ export default function JobsPage() {
     setSearch('')
   }
 
-  const selectGroup = (group: JobGroup) => {
-    setActiveGroup(group)
-    clearSearch()
+  const openJob = (job: CustomerJobRow) => {
+    const jobId = getJobId(job)
+
+    if (!jobId) {
+      setError('This row is missing a job id and cannot be opened.')
+      return
+    }
+
+    router.push(`/jobs/${encodeURIComponent(jobId)}`)
   }
 
   if (loading) {
-    return <main className="p-6">Loading jobs...</main>
+    return <main className="p-6">Loading customer jobs...</main>
   }
 
   if (!canViewJobs) {
     return (
       <main className="space-y-4 p-6">
-        <h1 className="text-2xl font-semibold">Jobs</h1>
+        <h1 className="text-2xl font-semibold">Customer Jobs</h1>
 
         <div className="rounded border border-red-700 bg-red-950 p-4 text-red-300">
           You do not have permission to view jobs.
@@ -332,11 +261,32 @@ export default function JobsPage() {
 
   return (
     <main className="space-y-4 p-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Jobs</h1>
-        <p className="text-xs text-gray-400">
-          Customer, serial number, AOS work order, and customer work order.
-        </p>
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold">{customerName} Jobs</h1>
+          <p className="text-xs text-gray-400">
+            Customer-specific job history by serial number, AOS work order, and
+            customer work order.
+          </p>
+        </div>
+
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => router.push('/customers')}
+            className="rounded border border-gray-700 bg-black px-4 py-2 text-sm text-gray-200 hover:border-gray-500 hover:text-white"
+          >
+            Back to Customers
+          </button>
+
+          <button
+            type="button"
+            onClick={() => router.push('/jobs')}
+            className="rounded border border-gray-700 bg-black px-4 py-2 text-sm text-gray-200 hover:border-gray-500 hover:text-white"
+          >
+            All Jobs
+          </button>
+        </div>
       </div>
 
       <div className="flex w-full flex-col gap-2 xl:flex-row xl:items-center">
@@ -348,7 +298,7 @@ export default function JobsPage() {
               submitSearch()
             }
           }}
-          placeholder="Search customer, serial, WO, stage..."
+          placeholder="Search serial, WO, stage..."
           className="min-w-0 flex-1 rounded border border-gray-700 bg-black px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
         />
 
@@ -360,8 +310,6 @@ export default function JobsPage() {
           >
             <option value="newest">Newest first</option>
             <option value="oldest">Oldest first</option>
-            <option value="customerAsc">Customer A-Z</option>
-            <option value="customerDesc">Customer Z-A</option>
             <option value="stageAsc">Stage A-Z</option>
             <option value="stageDesc">Stage Z-A</option>
             <option value="serialAsc">Serial A-Z</option>
@@ -399,84 +347,25 @@ export default function JobsPage() {
         </div>
       ) : null}
 
-      <section className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={() => selectGroup('active')}
-          className={groupButtonClass('active')}
-        >
-          Active: {activeProductionJobs.length}
-        </button>
-
-        <button
-          type="button"
-          onClick={() => selectGroup('awaitingReport')}
-          className={groupButtonClass('awaitingReport')}
-        >
-          Awaiting Report: {awaitingReportJobs.length}
-        </button>
-
-        <button
-          type="button"
-          onClick={() => selectGroup('readyForInvoice')}
-          className={groupButtonClass('readyForInvoice')}
-        >
-          Ready Invoice: {readyForInvoiceJobs.length}
-        </button>
-
-        <button
-          type="button"
-          onClick={() => selectGroup('invoiced')}
-          className={groupButtonClass('invoiced')}
-        >
-          Invoiced: {invoicedJobs.length}
-        </button>
-
-        <button
-          type="button"
-          onClick={() => selectGroup('arOpen')}
-          className={groupButtonClass('arOpen')}
-        >
-          AR Open: {arOpenJobs.length}
-        </button>
-
-        <button
-          type="button"
-          onClick={() => selectGroup('closed')}
-          className={groupButtonClass('closed')}
-        >
-          Closed: {closedJobs.length}
-        </button>
-
-        <button
-          type="button"
-          onClick={() => selectGroup('all')}
-          className={groupButtonClass('all')}
-        >
-          All: {jobs.length}
-        </button>
-      </section>
-
       <section className="rounded border border-gray-800 bg-gray-900">
         <div className="flex flex-col gap-1 border-b border-gray-800 px-4 py-2">
-          <h2 className="text-base font-semibold">{activeTitle}</h2>
+          <h2 className="text-base font-semibold">Customer Job History</h2>
           <p className="text-xs text-gray-400">
-            Showing {visibleJobs.length} of {jobs.length} jobs.
+            Showing {visibleJobs.length} of {jobs.length} customer jobs.
           </p>
         </div>
 
         {visibleJobs.length === 0 ? (
-          <div className="p-4 text-sm text-gray-400">No jobs found.</div>
+          <div className="p-4 text-sm text-gray-400">
+            No jobs found for this customer.
+          </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1150px] border-collapse text-left text-sm">
+            <table className="w-full min-w-[1050px] border-collapse text-left text-sm">
               <thead className="bg-black text-gray-300">
                 <tr>
                   <th className="border-b border-gray-800 px-4 py-2">
                     AOS Work Order
-                  </th>
-                  <th className="border-b border-gray-800 px-4 py-2">
-                    Customer
                   </th>
                   <th className="border-b border-gray-800 px-4 py-2">
                     Serial Number
@@ -494,65 +383,72 @@ export default function JobsPage() {
                     Created
                   </th>
                   <th className="border-b border-gray-800 px-4 py-2">
+                    Job ID
+                  </th>
+                  <th className="border-b border-gray-800 px-4 py-2">
                     Action
                   </th>
                 </tr>
               </thead>
 
               <tbody>
-                {visibleJobs.map((job) => (
-                  <tr
-                    key={job.job_id}
-                    className="border-b border-gray-800 hover:bg-gray-800/60"
-                  >
-                    <td className="px-4 py-2 font-semibold text-white">
-                      {job.internal_work_order_number ?? 'Missing'}
-                      <p className="mt-1 break-all text-xs font-normal text-gray-500">
-                        {job.job_id}
-                      </p>
-                    </td>
+                {visibleJobs.map((job) => {
+                  const normalizedJobId = getJobId(job)
 
-                    <td className="px-4 py-2">
-                      {job.customer_name ?? 'Unknown Customer'}
-                    </td>
+                  return (
+                    <tr
+                      key={normalizedJobId || `${job.internal_work_order_number}-${job.serial_number}`}
+                      className="border-b border-gray-800 hover:bg-gray-800/60"
+                    >
+                      <td className="px-4 py-2 font-semibold text-white">
+                        {job.internal_work_order_number ?? 'Missing'}
+                      </td>
 
-                    <td className="px-4 py-2">
-                      {job.serial_number ?? 'No serial'}
-                    </td>
+                      <td className="px-4 py-2">
+                        {job.serial_number ?? 'No serial'}
+                      </td>
 
-                    <td className="px-4 py-2">
-                      {job.customer_work_order_number ?? 'Not entered'}
-                    </td>
+                      <td className="px-4 py-2">
+                        {job.customer_work_order_number ?? 'Not entered'}
+                      </td>
 
-                    <td className="px-4 py-2">
-                      <span className="rounded bg-gray-800 px-2 py-1 text-xs text-gray-200">
-                        {job.internal_status}
-                      </span>
-                    </td>
+                      <td className="px-4 py-2">
+                        <span className="rounded bg-gray-800 px-2 py-1 text-xs text-gray-200">
+                          {job.internal_status}
+                        </span>
+                      </td>
 
-                    <td className="px-4 py-2">
-                      {job.qc_passed === null
-                        ? 'Pending'
-                        : job.qc_passed
-                          ? 'Passed'
-                          : 'Failed'}
-                    </td>
+                      <td className="px-4 py-2">
+                        {job.qc_passed === null
+                          ? 'Pending'
+                          : job.qc_passed
+                            ? 'Passed'
+                            : 'Failed'}
+                      </td>
 
-                    <td className="px-4 py-2">
-                      {formatTimestamp(job.created_at)}
-                    </td>
+                      <td className="px-4 py-2">
+                        {formatTimestamp(job.created_at)}
+                      </td>
 
-                    <td className="px-4 py-2">
-                      <button
-                        type="button"
-                        onClick={() => router.push(`/jobs/${job.job_id}`)}
-                        className="rounded bg-blue-700 px-3 py-1.5 text-xs text-white hover:bg-blue-600"
-                      >
-                        Open Job
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                      <td className="px-4 py-2">
+                        <span className="break-all text-xs text-gray-500">
+                          {normalizedJobId || 'Missing'}
+                        </span>
+                      </td>
+
+                      <td className="px-4 py-2">
+                        <button
+                          type="button"
+                          disabled={!normalizedJobId}
+                          onClick={() => openJob(job)}
+                          className="rounded bg-blue-700 px-3 py-1.5 text-xs text-white hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Open Job
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>

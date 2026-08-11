@@ -1,13 +1,8 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { createClient } from "@supabase/supabase-js"
 import { useRouter } from "next/navigation"
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+import { supabase } from "@/lib/supabase"
 
 export default function Home() {
   const [email, setEmail] = useState("")
@@ -32,7 +27,6 @@ export default function Home() {
       return
     }
 
-    // 1️⃣ Create auth user
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
@@ -50,7 +44,6 @@ export default function Home() {
 
     const userId = data.user.id
 
-    // 2️⃣ Create new tenant
     const { data: tenant, error: tenantError } = await supabase
       .from("tenants")
       .insert({
@@ -64,7 +57,6 @@ export default function Home() {
       return
     }
 
-    // 3️⃣ Create profile tied to tenant
     const { error: profileError } = await supabase
       .from("profiles")
       .insert({
@@ -86,6 +78,7 @@ export default function Home() {
       email,
       password,
     })
+
     if (error) {
       setMessage(error.message)
     } else {
