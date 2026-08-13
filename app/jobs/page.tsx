@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
@@ -84,8 +84,13 @@ function timeValue(value: string | null) {
   return date.getTime()
 }
 
-function safeText(value: string | null) {
+function safeText(value: string | null | undefined) {
   return value?.toLowerCase() ?? ''
+}
+
+function qcLabel(value: boolean | null) {
+  if (value === null) return 'Pending'
+  return value ? 'Passed' : 'Failed'
 }
 
 export default function JobsPage() {
@@ -94,6 +99,7 @@ export default function JobsPage() {
   const [permissions, setPermissions] = useState<PermissionRow[]>([])
   const [jobs, setJobs] = useState<JobDashboardRow[]>([])
   const [activeGroup, setActiveGroup] = useState<JobGroup>('active')
+  const [expandedJobId, setExpandedJobId] = useState<string | null>(null)
   const [searchDraft, setSearchDraft] = useState('')
   const [search, setSearch] = useState('')
   const [sortMode, setSortMode] = useState<SortMode>('newest')
@@ -219,6 +225,9 @@ export default function JobsPage() {
         job.serial_number,
         job.internal_status,
         job.job_id,
+        job.tenant_id,
+        job.customer_id,
+        job.tool_id,
       ]
         .filter(Boolean)
         .join(' ')
@@ -249,11 +258,15 @@ export default function JobsPage() {
       }
 
       if (sortMode === 'stageAsc') {
-        return safeText(a.internal_status).localeCompare(safeText(b.internal_status))
+        return safeText(a.internal_status).localeCompare(
+          safeText(b.internal_status)
+        )
       }
 
       if (sortMode === 'stageDesc') {
-        return safeText(b.internal_status).localeCompare(safeText(a.internal_status))
+        return safeText(b.internal_status).localeCompare(
+          safeText(a.internal_status)
+        )
       }
 
       if (sortMode === 'serialAsc') {
@@ -312,6 +325,15 @@ export default function JobsPage() {
   const selectGroup = (group: JobGroup) => {
     setActiveGroup(group)
     clearSearch()
+    setExpandedJobId(null)
+  }
+
+  const toggleExpandedJob = (jobId: string) => {
+    setExpandedJobId((current) => (current === jobId ? null : jobId))
+  }
+
+  const openJob = (jobId: string) => {
+    router.push(`/jobs/${jobId}`)
   }
 
   if (loading) {
@@ -335,24 +357,35 @@ export default function JobsPage() {
       <div>
         <h1 className="text-2xl font-semibold">Jobs</h1>
         <p className="text-xs text-gray-400">
-          Customer, serial number, AOS work order, and customer work order.
+          Customer, serial number, AOS work order, and customer work order. Click
+          a row to expand technical IDs.
         </p>
       </div>
 
-      <div className="flex w-full flex-col gap-2 xl:flex-row xl:items-center">
-        <input
-          value={searchDraft}
-          onChange={(event) => setSearchDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              submitSearch()
-            }
-          }}
-          placeholder="Search customer, serial, WO, stage..."
-          className="min-w-0 flex-1 rounded border border-gray-700 bg-black px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
-        />
+      <div className="space-y-2">
+        <div className="flex w-full items-center gap-2">
+          <input
+            value={searchDraft}
+            onChange={(event) => setSearchDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                submitSearch()
+              }
+            }}
+            placeholder="Search customer, serial, WO, stage..."
+            className="min-w-0 flex-1 rounded border border-gray-700 bg-black px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
+          />
 
-        <div className="flex shrink-0 gap-2">
+          <button
+            type="button"
+            onClick={submitSearch}
+            className="shrink-0 rounded bg-blue-700 px-4 py-2 text-sm text-white hover:bg-blue-600"
+          >
+            Search
+          </button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
           <select
             value={sortMode}
             onChange={(event) => setSortMode(event.target.value as SortMode)}
@@ -369,14 +402,6 @@ export default function JobsPage() {
             <option value="internalWoAsc">AOS WO low-high</option>
             <option value="internalWoDesc">AOS WO high-low</option>
           </select>
-
-          <button
-            type="button"
-            onClick={submitSearch}
-            className="rounded bg-blue-700 px-4 py-2 text-sm text-white hover:bg-blue-600"
-          >
-            Search
-          </button>
         </div>
       </div>
 
@@ -472,87 +497,155 @@ export default function JobsPage() {
             <table className="w-full min-w-[1150px] border-collapse text-left text-sm">
               <thead className="bg-black text-gray-300">
                 <tr>
-                  <th className="border-b border-gray-800 px-4 py-2">
+                  <th className="border-b border-gray-800 px-3 py-2">
                     AOS Work Order
                   </th>
-                  <th className="border-b border-gray-800 px-4 py-2">
+                  <th className="border-b border-gray-800 px-3 py-2">
                     Customer
                   </th>
-                  <th className="border-b border-gray-800 px-4 py-2">
-                    Serial Number
+                  <th className="border-b border-gray-800 px-3 py-2">
+                    Serial
                   </th>
-                  <th className="border-b border-gray-800 px-4 py-2">
+                  <th className="border-b border-gray-800 px-3 py-2">
                     Customer WO
                   </th>
-                  <th className="border-b border-gray-800 px-4 py-2">
+                  <th className="border-b border-gray-800 px-3 py-2">
                     Stage
                   </th>
-                  <th className="border-b border-gray-800 px-4 py-2">
-                    QC
-                  </th>
-                  <th className="border-b border-gray-800 px-4 py-2">
+                  <th className="border-b border-gray-800 px-3 py-2">QC</th>
+                  <th className="border-b border-gray-800 px-3 py-2">
                     Created
                   </th>
-                  <th className="border-b border-gray-800 px-4 py-2">
+                  <th className="border-b border-gray-800 px-3 py-2">
                     Action
                   </th>
                 </tr>
               </thead>
 
               <tbody>
-                {visibleJobs.map((job) => (
-                  <tr
-                    key={job.job_id}
-                    className="border-b border-gray-800 hover:bg-gray-800/60"
-                  >
-                    <td className="px-4 py-2 font-semibold text-white">
-                      {job.internal_work_order_number ?? 'Missing'}
-                      <p className="mt-1 break-all text-xs font-normal text-gray-500">
-                        {job.job_id}
-                      </p>
-                    </td>
+                {visibleJobs.map((job) => {
+                  const isExpanded = expandedJobId === job.job_id
 
-                    <td className="px-4 py-2">
-                      {job.customer_name ?? 'Unknown Customer'}
-                    </td>
-
-                    <td className="px-4 py-2">
-                      {job.serial_number ?? 'No serial'}
-                    </td>
-
-                    <td className="px-4 py-2">
-                      {job.customer_work_order_number ?? 'Not entered'}
-                    </td>
-
-                    <td className="px-4 py-2">
-                      <span className="rounded bg-gray-800 px-2 py-1 text-xs text-gray-200">
-                        {job.internal_status}
-                      </span>
-                    </td>
-
-                    <td className="px-4 py-2">
-                      {job.qc_passed === null
-                        ? 'Pending'
-                        : job.qc_passed
-                          ? 'Passed'
-                          : 'Failed'}
-                    </td>
-
-                    <td className="px-4 py-2">
-                      {formatTimestamp(job.created_at)}
-                    </td>
-
-                    <td className="px-4 py-2">
-                      <button
-                        type="button"
-                        onClick={() => router.push(`/jobs/${job.job_id}`)}
-                        className="rounded bg-blue-700 px-3 py-1.5 text-xs text-white hover:bg-blue-600"
+                  return (
+                    <Fragment key={job.job_id}>
+                      <tr
+                        onClick={() => toggleExpandedJob(job.job_id)}
+                        className="cursor-pointer border-b border-gray-800 hover:bg-gray-800/60"
                       >
-                        Open Job
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                        <td className="px-3 py-2 font-semibold text-white">
+                          {job.internal_work_order_number ?? 'Missing'}
+                        </td>
+
+                        <td className="px-3 py-2">
+                          {job.customer_name ?? 'Unknown Customer'}
+                        </td>
+
+                        <td className="px-3 py-2">
+                          {job.serial_number ?? 'No serial'}
+                        </td>
+
+                        <td className="px-3 py-2">
+                          {job.customer_work_order_number ?? 'Not entered'}
+                        </td>
+
+                        <td className="px-3 py-2">
+                          <span className="rounded bg-gray-800 px-2 py-1 text-xs text-gray-200">
+                            {job.internal_status}
+                          </span>
+                        </td>
+
+                        <td className="px-3 py-2">{qcLabel(job.qc_passed)}</td>
+
+                        <td className="px-3 py-2">
+                          {formatTimestamp(job.created_at)}
+                        </td>
+
+                        <td className="px-3 py-2">
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                openJob(job.job_id)
+                              }}
+                              className="rounded bg-blue-700 px-3 py-1.5 text-xs text-white hover:bg-blue-600"
+                            >
+                              Open Job
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                toggleExpandedJob(job.job_id)
+                              }}
+                              className="rounded border border-gray-700 bg-black px-3 py-1.5 text-xs text-gray-200 hover:border-gray-500 hover:text-white"
+                            >
+                              {isExpanded ? 'Collapse' : 'Expand'}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+
+                      {isExpanded ? (
+                        <tr className="border-b border-gray-800 bg-black/40">
+                          <td colSpan={8} className="px-3 py-2">
+                            <div className="grid grid-cols-1 gap-2 text-xs lg:grid-cols-[1.8fr_1.8fr_1.8fr_auto] lg:items-center">
+                              <div className="min-w-0">
+                                <p className="text-gray-500">Job ID</p>
+                                <p
+                                  title={job.job_id}
+                                  className="truncate font-mono text-gray-300"
+                                >
+                                  {job.job_id}
+                                </p>
+                              </div>
+
+                              <div className="min-w-0">
+                                <p className="text-gray-500">Customer / Tool</p>
+                                <p
+                                  title={`Customer ID: ${job.customer_id}`}
+                                  className="truncate font-mono text-gray-300"
+                                >
+                                  Customer: {job.customer_id}
+                                </p>
+                                <p
+                                  title={`Tool ID: ${job.tool_id}`}
+                                  className="truncate font-mono text-gray-300"
+                                >
+                                  Tool: {job.tool_id}
+                                </p>
+                              </div>
+
+                              <div className="min-w-0">
+                                <p className="text-gray-500">Tenant / Status</p>
+                                <p
+                                  title={`Tenant ID: ${job.tenant_id}`}
+                                  className="truncate font-mono text-gray-300"
+                                >
+                                  Tenant: {job.tenant_id}
+                                </p>
+                                <p className="truncate text-gray-300">
+                                  {job.internal_status} • {qcLabel(job.qc_passed)}
+                                </p>
+                              </div>
+
+                              <div className="flex justify-start lg:justify-end">
+                                <button
+                                  type="button"
+                                  onClick={() => openJob(job.job_id)}
+                                  className="rounded bg-blue-700 px-3 py-1.5 text-xs text-white hover:bg-blue-600"
+                                >
+                                  Open Job
+                                </button>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
+                  )
+                })}
               </tbody>
             </table>
           </div>
