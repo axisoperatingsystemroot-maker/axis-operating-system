@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
@@ -115,6 +116,7 @@ export default function JobsPage() {
   }, [permissions])
 
   const canViewJobs = allowedPermissions.has('view_jobs')
+  const canEditJobs = allowedPermissions.has('edit_jobs')
 
   const loadJobs = async () => {
     setLoading(true)
@@ -354,12 +356,26 @@ export default function JobsPage() {
 
   return (
     <main className="space-y-4 p-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Jobs</h1>
-        <p className="text-xs text-gray-400">
-          Customer, serial number, AOS work order, and customer work order. Click
-          a row to expand technical IDs.
-        </p>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold">Jobs</h1>
+          <p className="text-xs text-gray-400">
+            Customer, serial number, AOS work order, and customer work order.
+            Click a row to expand technical IDs.
+          </p>
+        </div>
+
+        {canEditJobs ? (
+          <div className="flex w-full justify-start lg:w-auto lg:justify-end">
+            <Link
+              href="/jobs/new"
+              style={{ width: 'fit-content', maxWidth: 'fit-content' }}
+              className="inline-flex !w-auto shrink-0 items-center justify-center rounded bg-green-700 px-4 py-2 text-sm font-semibold text-white hover:bg-green-600"
+            >
+              New Job
+            </Link>
+          </div>
+        ) : null}
       </div>
 
       <div className="space-y-2">
