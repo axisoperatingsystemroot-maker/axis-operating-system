@@ -128,6 +128,21 @@ const POST_INSPECTION_OPTIONS = [
   'SCRAPPED',
 ] as const
 
+const INSPECTION_TYPE_OPTIONS = [
+  'INITIAL_INSPECTION',
+  'POST_CUTDOWN_INSPECTION',
+  'POST_BUILD_INSPECTION',
+  'PRE_HARDMETAL_INSPECTION',
+  'POST_HARD_METAL_INSPECTION',
+  'FINAL_MACHINE_INSPECTION',
+  'PROFILE_GRIND_INSPECTION',
+  'INTERNAL_QC_INSPECTION',
+  'FINAL_THIRD_PARTY_INSPECTION',
+  'CRACK_REPAIR_INSPECTION',
+  'HARD_BANDING_INSPECTION',
+  'OTHER',
+] as const
+
 type RerouteStage = (typeof AXIS_REROUTE_OPTIONS)[number]
 type AnyRouteStage = (typeof ALL_STAGE_ROUTE_OPTIONS)[number]
 type PostInspectionStage = (typeof POST_INSPECTION_OPTIONS)[number]
@@ -1151,12 +1166,17 @@ export default function JobDetailPage() {
 
             <label className="space-y-2">
               <span className="text-sm font-medium text-gray-200">Inspection Type</span>
-              <input
+              <select
                 value={inspectionType}
                 onChange={(event) => setInspectionType(event.target.value)}
-                placeholder="INITIAL_INSPECTION"
                 className="w-full rounded border border-gray-700 bg-black px-3 py-2 text-white"
-              />
+              >
+                {INSPECTION_TYPE_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
             </label>
 
             <label className="space-y-2 md:col-span-2">
