@@ -53,6 +53,36 @@ type InboundReport = {
   created_at: string | null
 }
 
+type JobNoteRow = {
+  note_id: string
+  job_id: string
+  note_text: string
+  created_by: string
+  created_at: string
+}
+
+type InspectionResultRow = {
+  result_id: string
+  session_id: string
+  job_id: string
+  stage_at_time: string
+  inspector_id: string
+  inspection_type: string
+  result: 'PASS' | 'FAIL'
+  notes: string | null
+  photo_urls: string[] | null
+  ojt_hours: number | null
+  requires_signoff: boolean
+  signed_off_by: string | null
+  recorded_at: string
+  is_correction: boolean
+  is_superseded: boolean
+  correction_of_result_id: string | null
+  correction_reason: string | null
+  corrected_by: string | null
+  corrected_at: string | null
+}
+
 const AXIS_REROUTE_OPTIONS = [
   'INSPECTION',
   'STRIP',
@@ -162,6 +192,30 @@ export default function JobDetailPage() {
     InboundReport[]
   >([])
   const [selectedInboundReportId, setSelectedInboundReportId] = useState('')
+  const [inspectionResults, setInspectionResults] = useState<InspectionResultRow[]>(
+    []
+  )
+  const [internalNotes, setInternalNotes] = useState<JobNoteRow[]>([])
+  const [customerNotes, setCustomerNotes] = useState<JobNoteRow[]>([])
+  const [inspectionResultValue, setInspectionResultValue] =
+    useState<'PASS' | 'FAIL'>('PASS')
+  const [inspectionType, setInspectionType] = useState('INITIAL_INSPECTION')
+  const [inspectionNotes, setInspectionNotes] = useState('')
+  const [inspectionPhotoUrls, setInspectionPhotoUrls] = useState('')
+  const [inspectionOjtHours, setInspectionOjtHours] = useState('0')
+  const [inspectionRequiresSignoff, setInspectionRequiresSignoff] =
+    useState(false)
+  const [correctionResultValue, setCorrectionResultValue] =
+    useState<'PASS' | 'FAIL'>('PASS')
+  const [correctionReason, setCorrectionReason] = useState('')
+  const [correctionNotes, setCorrectionNotes] = useState('')
+  const [correctionPhotoUrls, setCorrectionPhotoUrls] = useState('')
+  const [correctionOjtHours, setCorrectionOjtHours] = useState('0')
+  const [correctionRequiresSignoff, setCorrectionRequiresSignoff] =
+    useState(false)
+  const [showCorrectionForm, setShowCorrectionForm] = useState(false)
+  const [newInternalNote, setNewInternalNote] = useState('')
+  const [newCustomerNote, setNewCustomerNote] = useState('')
 
   const allowedPermissions = useMemo(() => {
     return new Set(
@@ -173,6 +227,13 @@ export default function JobDetailPage() {
 
   const canViewJobs = allowedPermissions.has('view_jobs')
   const canRouteAnyStage = allowedPermissions.has('route_jobs_any_stage')
+  const canEditJobs = allowedPermissions.has('edit_jobs')
+  const canOverrideInspectionResults = allowedPermissions.has(
+    'override_inspection_results'
+  )
+  const canPublishCustomerNotes = allowedPermissions.has(
+    'publish_customer_job_notes'
+  )
 
   const isQcControlledStage = useMemo(() => {
     return (
@@ -202,9 +263,34 @@ export default function JobDetailPage() {
     return job?.internal_status === 'CLOSED'
   }, [job?.internal_status])
 
+  const effectiveInspectionResult = useMemo(() => {
+    return (
+      inspectionResults.find((result) => !result.is_superseded) ?? null
+    )
+  }, [inspectionResults])
+
+  const shouldShowInspectionCaptureForm = useMemo(() => {
+    return isInspectionStage && !effectiveInspectionResult
+  }, [effectiveInspectionResult, isInspectionStage])
+
   const canShowAlternateRoute = useMemo(() => {
     return canRouteAnyStage && job?.internal_status !== 'CLOSED'
   }, [canRouteAnyStage, job?.internal_status])
+
+  const parsePhotoUrls = (value: string) => {
+    return value
+      .split(/\r?\n|,/)
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+  }
+
+  const parseOjtHours = (value: string) => {
+    if (!value.trim()) return 0
+
+    const parsed = Number(value)
+
+    return Number.isFinite(parsed) ? parsed : Number.NaN
+  }
 
   const loadPermissions = async () => {
     const { data, error } = await supabase.rpc('get_current_user_permissions_v1')
@@ -237,6 +323,72 @@ export default function JobDetailPage() {
     }
 
     setAvailableInboundReports((data ?? []) as InboundReport[])
+  }
+
+  const loadInspectionResults = async () => {
+    if (!jobId) {
+      setInspectionResults([])
+      return
+    }
+
+    const { data, error } = await supabase.rpc('get_job_inspection_results_v1', {
+      p_job_id: jobId,
+    })
+
+    if (error) {
+      setError(`Inspection results load failed: ${error.message}`)
+      setInspectionResults([])
+      return
+    }
+
+    setInspectionResults((data ?? []) as InspectionResultRow[])
+  }
+
+  const loadInternalNotes = async () => {
+    if (!jobId) {
+      setInternalNotes([])
+      return
+    }
+
+    const { data, error } = await supabase.rpc('get_job_internal_notes_v1', {
+      p_job_id: jobId,
+    })
+
+    if (error) {
+      setError(`Internal notes load failed: ${error.message}`)
+      setInternalNotes([])
+      return
+    }
+
+    setInternalNotes((data ?? []) as JobNoteRow[])
+  }
+
+  const loadCustomerNotes = async () => {
+    if (!jobId) {
+      setCustomerNotes([])
+      return
+    }
+
+    const { data, error } = await supabase.rpc('get_job_customer_notes_v1', {
+      p_job_id: jobId,
+    })
+
+    if (error) {
+      setError(`Customer notes load failed: ${error.message}`)
+      setCustomerNotes([])
+      return
+    }
+
+    setCustomerNotes((data ?? []) as JobNoteRow[])
+  }
+
+  const loadJobDetailSupportData = async () => {
+    await Promise.all([
+      loadInboundReports(),
+      loadInspectionResults(),
+      loadInternalNotes(),
+      loadCustomerNotes(),
+    ])
   }
 
   const mapDashboardRowToJob = (row: JobDashboardRow): Job => {
@@ -291,7 +443,7 @@ export default function JobDetailPage() {
       if (matchingJob) {
         const nextJob = mapDashboardRowToJob(matchingJob)
         setJob(nextJob)
-        await loadInboundReports()
+        await loadJobDetailSupportData()
         setLoading(false)
         return
       }
@@ -312,7 +464,7 @@ export default function JobDetailPage() {
     } else {
       const nextJob = data as Job
       setJob(nextJob)
-      await loadInboundReports()
+      await loadJobDetailSupportData()
     }
 
     setLoading(false)
@@ -662,6 +814,171 @@ export default function JobDetailPage() {
     setWorking(false)
   }
 
+  const runRecordInspectionResult = async () => {
+    if (!job) return
+
+    setWorking(true)
+    setError('')
+    setMessage('')
+
+    const nextPhotoUrls = parsePhotoUrls(inspectionPhotoUrls)
+    const nextOjtHours = parseOjtHours(inspectionOjtHours)
+
+    if (Number.isNaN(nextOjtHours) || nextOjtHours < 0) {
+      setError('OJT hours must be zero or greater.')
+      setWorking(false)
+      return
+    }
+
+    if (inspectionResultValue === 'FAIL' && nextPhotoUrls.length === 0) {
+      setError('Photo URLs are required for failed inspections.')
+      setWorking(false)
+      return
+    }
+
+    const { error } = await supabase.rpc('record_job_inspection_result_v1', {
+      p_job_id: job.id,
+      p_inspection_type: inspectionType.trim() || 'INITIAL_INSPECTION',
+      p_result: inspectionResultValue,
+      p_notes: inspectionNotes.trim() || null,
+      p_photo_urls: nextPhotoUrls,
+      p_ojt_hours: nextOjtHours,
+      p_requires_signoff: inspectionRequiresSignoff,
+    })
+
+    if (error) {
+      setError(error.message)
+    } else {
+      setMessage('Inspection result recorded successfully.')
+      setInspectionResultValue('PASS')
+      setInspectionType('INITIAL_INSPECTION')
+      setInspectionNotes('')
+      setInspectionPhotoUrls('')
+      setInspectionOjtHours('0')
+      setInspectionRequiresSignoff(false)
+      await loadJob()
+    }
+
+    setWorking(false)
+  }
+
+  const runCorrectInspectionResult = async () => {
+    if (!effectiveInspectionResult) return
+
+    setWorking(true)
+    setError('')
+    setMessage('')
+
+    const nextPhotoUrls = parsePhotoUrls(correctionPhotoUrls)
+    const nextOjtHours = parseOjtHours(correctionOjtHours)
+
+    if (!correctionReason.trim()) {
+      setError('Correction reason is required.')
+      setWorking(false)
+      return
+    }
+
+    if (Number.isNaN(nextOjtHours) || nextOjtHours < 0) {
+      setError('OJT hours must be zero or greater.')
+      setWorking(false)
+      return
+    }
+
+    if (correctionResultValue === 'FAIL' && nextPhotoUrls.length === 0) {
+      setError('Photo URLs are required for failed inspections.')
+      setWorking(false)
+      return
+    }
+
+    const { error } = await supabase.rpc('correct_job_inspection_result_v1', {
+      p_original_result_id: effectiveInspectionResult.result_id,
+      p_result: correctionResultValue,
+      p_correction_reason: correctionReason.trim(),
+      p_notes: correctionNotes.trim() || null,
+      p_photo_urls: nextPhotoUrls,
+      p_ojt_hours: nextOjtHours,
+      p_requires_signoff: correctionRequiresSignoff,
+    })
+
+    if (error) {
+      setError(error.message)
+    } else {
+      setMessage('Inspection correction recorded successfully.')
+      setCorrectionResultValue(effectiveInspectionResult.result)
+      setCorrectionReason('')
+      setCorrectionNotes('')
+      setCorrectionPhotoUrls('')
+      setCorrectionOjtHours(
+        String(Number(effectiveInspectionResult.ojt_hours ?? 0))
+      )
+      setCorrectionRequiresSignoff(
+        Boolean(effectiveInspectionResult.requires_signoff)
+      )
+      setShowCorrectionForm(false)
+      await loadJob()
+    }
+
+    setWorking(false)
+  }
+
+  const runAddInternalNote = async () => {
+    if (!job) return
+
+    setWorking(true)
+    setError('')
+    setMessage('')
+
+    if (!newInternalNote.trim()) {
+      setError('Internal note text is required.')
+      setWorking(false)
+      return
+    }
+
+    const { error } = await supabase.rpc('add_job_internal_note_v1', {
+      p_job_id: job.id,
+      p_note_text: newInternalNote.trim(),
+    })
+
+    if (error) {
+      setError(error.message)
+    } else {
+      setMessage('Internal note added successfully.')
+      setNewInternalNote('')
+      await loadInternalNotes()
+    }
+
+    setWorking(false)
+  }
+
+  const runAddCustomerNote = async () => {
+    if (!job) return
+
+    setWorking(true)
+    setError('')
+    setMessage('')
+
+    if (!newCustomerNote.trim()) {
+      setError('Customer note text is required.')
+      setWorking(false)
+      return
+    }
+
+    const { error } = await supabase.rpc('add_job_customer_note_v1', {
+      p_job_id: job.id,
+      p_note_text: newCustomerNote.trim(),
+    })
+
+    if (error) {
+      setError(error.message)
+    } else {
+      setMessage('Customer-facing note published successfully.')
+      setNewCustomerNote('')
+      await loadCustomerNotes()
+    }
+
+    setWorking(false)
+  }
+
   if (loading) {
     return <div className="p-6">Loading job...</div>
   }
@@ -810,6 +1127,319 @@ export default function JobDetailPage() {
         </div>
       ) : null}
 
+      {shouldShowInspectionCaptureForm ? (
+        <div className="rounded border border-gray-800 bg-gray-900 p-4 space-y-4">
+          <h2 className="text-xl font-semibold">Inspection Result Capture</h2>
+          <p className="text-sm text-gray-400">
+            Record the current inspection result before post-inspection routing continues.
+          </p>
+
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <label className="space-y-2">
+              <span className="text-sm font-medium text-gray-200">Result</span>
+              <select
+                value={inspectionResultValue}
+                onChange={(event) =>
+                  setInspectionResultValue(event.target.value as 'PASS' | 'FAIL')
+                }
+                className="w-full rounded border border-gray-700 bg-black px-3 py-2 text-white"
+              >
+                <option value="PASS">PASS</option>
+                <option value="FAIL">FAIL</option>
+              </select>
+            </label>
+
+            <label className="space-y-2">
+              <span className="text-sm font-medium text-gray-200">Inspection Type</span>
+              <input
+                value={inspectionType}
+                onChange={(event) => setInspectionType(event.target.value)}
+                placeholder="INITIAL_INSPECTION"
+                className="w-full rounded border border-gray-700 bg-black px-3 py-2 text-white"
+              />
+            </label>
+
+            <label className="space-y-2 md:col-span-2">
+              <span className="text-sm font-medium text-gray-200">Notes</span>
+              <textarea
+                value={inspectionNotes}
+                onChange={(event) => setInspectionNotes(event.target.value)}
+                placeholder="Inspection notes"
+                className="min-h-[110px] w-full rounded border border-gray-700 bg-black px-3 py-2 text-white"
+              />
+            </label>
+
+            <label className="space-y-2 md:col-span-2">
+              <span className="text-sm font-medium text-gray-200">
+                Photo URLs / Storage Paths
+              </span>
+              <textarea
+                value={inspectionPhotoUrls}
+                onChange={(event) => setInspectionPhotoUrls(event.target.value)}
+                placeholder="One per line or comma-separated. Required for FAIL."
+                className="min-h-[110px] w-full rounded border border-gray-700 bg-black px-3 py-2 text-white"
+              />
+            </label>
+
+            <label className="space-y-2">
+              <span className="text-sm font-medium text-gray-200">OJT Hours</span>
+              <input
+                type="number"
+                min="0"
+                step="0.25"
+                value={inspectionOjtHours}
+                onChange={(event) => setInspectionOjtHours(event.target.value)}
+                className="w-full rounded border border-gray-700 bg-black px-3 py-2 text-white"
+              />
+            </label>
+
+            <label className="flex items-center gap-3 rounded border border-gray-800 bg-black px-3 py-2">
+              <input
+                type="checkbox"
+                checked={inspectionRequiresSignoff}
+                onChange={(event) =>
+                  setInspectionRequiresSignoff(event.target.checked)
+                }
+              />
+              <span className="text-sm text-gray-200">Requires signoff</span>
+            </label>
+          </div>
+
+          <button
+            type="button"
+            onClick={runRecordInspectionResult}
+            disabled={working}
+            className="rounded bg-blue-600 px-4 py-2 text-white disabled:opacity-50"
+          >
+            {working ? 'Working...' : 'Save Inspection Result'}
+          </button>
+        </div>
+      ) : null}
+
+      {inspectionResults.length > 0 ? (
+        <div className="rounded border border-gray-800 bg-gray-900 p-4 space-y-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-semibold">Inspection Results</h2>
+              <p className="text-sm text-gray-400">
+                Current effective result and append-only history for this job.
+              </p>
+            </div>
+
+            {canOverrideInspectionResults && effectiveInspectionResult ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setCorrectionResultValue(effectiveInspectionResult.result)
+                  setCorrectionNotes(effectiveInspectionResult.notes ?? '')
+                  setCorrectionPhotoUrls(
+                    (effectiveInspectionResult.photo_urls ?? []).join('\n')
+                  )
+                  setCorrectionOjtHours(
+                    String(Number(effectiveInspectionResult.ojt_hours ?? 0))
+                  )
+                  setCorrectionRequiresSignoff(
+                    Boolean(effectiveInspectionResult.requires_signoff)
+                  )
+                  setShowCorrectionForm((current) => !current)
+                }}
+                className="rounded bg-yellow-700 px-4 py-2 text-white"
+              >
+                {showCorrectionForm ? 'Cancel Correction' : 'Correct Effective Result'}
+              </button>
+            ) : null}
+          </div>
+
+          {effectiveInspectionResult ? (
+            <div className="rounded border border-gray-800 bg-black/40 p-4 space-y-2">
+              <p className="text-sm text-gray-400">Effective Result</p>
+              <p className="text-lg font-semibold">
+                {effectiveInspectionResult.inspection_type} - {effectiveInspectionResult.result}
+              </p>
+              <p className="text-sm text-gray-300">
+                Recorded {formatTimestamp(effectiveInspectionResult.recorded_at)} during{' '}
+                {effectiveInspectionResult.stage_at_time}
+              </p>
+              <p className="text-sm text-gray-300">
+                OJT Hours: {String(effectiveInspectionResult.ojt_hours ?? 0)} | Requires
+                Signoff: {effectiveInspectionResult.requires_signoff ? 'Yes' : 'No'}
+              </p>
+              {effectiveInspectionResult.notes ? (
+                <p className="text-sm text-gray-200 whitespace-pre-wrap">
+                  {effectiveInspectionResult.notes}
+                </p>
+              ) : null}
+              {(effectiveInspectionResult.photo_urls ?? []).length > 0 ? (
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-gray-200">Photo URLs</p>
+                  {(effectiveInspectionResult.photo_urls ?? []).map((photoUrl) => (
+                    <p key={photoUrl} className="break-all text-sm text-blue-300">
+                      {photoUrl}
+                    </p>
+                  ))}
+                </div>
+              ) : null}
+              {effectiveInspectionResult.correction_reason ? (
+                <p className="text-sm text-yellow-300">
+                  Correction reason: {effectiveInspectionResult.correction_reason}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {showCorrectionForm && effectiveInspectionResult ? (
+            <div className="rounded border border-yellow-800 bg-yellow-950/30 p-4 space-y-3">
+              <h3 className="text-lg font-semibold">Inspection Correction</h3>
+              <p className="text-sm text-gray-400">
+                This records a new correction entry without altering prior inspection rows.
+              </p>
+
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <label className="space-y-2">
+                  <span className="text-sm font-medium text-gray-200">Corrected Result</span>
+                  <select
+                    value={correctionResultValue}
+                    onChange={(event) =>
+                      setCorrectionResultValue(event.target.value as 'PASS' | 'FAIL')
+                    }
+                    className="w-full rounded border border-gray-700 bg-black px-3 py-2 text-white"
+                  >
+                    <option value="PASS">PASS</option>
+                    <option value="FAIL">FAIL</option>
+                  </select>
+                </label>
+
+                <label className="space-y-2">
+                  <span className="text-sm font-medium text-gray-200">Inspection Type</span>
+                  <input
+                    value={effectiveInspectionResult.inspection_type}
+                    readOnly
+                    className="w-full rounded border border-gray-800 bg-black px-3 py-2 text-gray-400"
+                  />
+                </label>
+
+                <label className="space-y-2 md:col-span-2">
+                  <span className="text-sm font-medium text-gray-200">Correction Reason</span>
+                  <textarea
+                    value={correctionReason}
+                    onChange={(event) => setCorrectionReason(event.target.value)}
+                    placeholder="Required correction reason"
+                    className="min-h-[100px] w-full rounded border border-gray-700 bg-black px-3 py-2 text-white"
+                  />
+                </label>
+
+                <label className="space-y-2 md:col-span-2">
+                  <span className="text-sm font-medium text-gray-200">Notes</span>
+                  <textarea
+                    value={correctionNotes}
+                    onChange={(event) => setCorrectionNotes(event.target.value)}
+                    placeholder="Corrected inspection notes"
+                    className="min-h-[110px] w-full rounded border border-gray-700 bg-black px-3 py-2 text-white"
+                  />
+                </label>
+
+                <label className="space-y-2 md:col-span-2">
+                  <span className="text-sm font-medium text-gray-200">
+                    Photo URLs / Storage Paths
+                  </span>
+                  <textarea
+                    value={correctionPhotoUrls}
+                    onChange={(event) => setCorrectionPhotoUrls(event.target.value)}
+                    placeholder="One per line or comma-separated. Required for FAIL."
+                    className="min-h-[110px] w-full rounded border border-gray-700 bg-black px-3 py-2 text-white"
+                  />
+                </label>
+
+                <label className="space-y-2">
+                  <span className="text-sm font-medium text-gray-200">OJT Hours</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.25"
+                    value={correctionOjtHours}
+                    onChange={(event) => setCorrectionOjtHours(event.target.value)}
+                    className="w-full rounded border border-gray-700 bg-black px-3 py-2 text-white"
+                  />
+                </label>
+
+                <label className="flex items-center gap-3 rounded border border-gray-800 bg-black px-3 py-2">
+                  <input
+                    type="checkbox"
+                    checked={correctionRequiresSignoff}
+                    onChange={(event) =>
+                      setCorrectionRequiresSignoff(event.target.checked)
+                    }
+                  />
+                  <span className="text-sm text-gray-200">Requires signoff</span>
+                </label>
+              </div>
+
+              <button
+                type="button"
+                onClick={runCorrectInspectionResult}
+                disabled={working}
+                className="rounded bg-yellow-700 px-4 py-2 text-white disabled:opacity-50"
+              >
+                {working ? 'Working...' : 'Save Correction'}
+              </button>
+            </div>
+          ) : null}
+
+          <div className="space-y-3">
+            <h3 className="text-lg font-semibold">Inspection History</h3>
+            {inspectionResults.map((result) => (
+              <div
+                key={result.result_id}
+                className="rounded border border-gray-800 bg-black/30 p-4 space-y-2"
+              >
+                <div className="flex flex-wrap items-center gap-2 text-sm text-gray-300">
+                  <span className="font-semibold text-white">
+                    {result.inspection_type} - {result.result}
+                  </span>
+                  <span>•</span>
+                  <span>{formatTimestamp(result.recorded_at)}</span>
+                  <span>•</span>
+                  <span>{result.stage_at_time}</span>
+                  {result.is_superseded ? (
+                    <>
+                      <span>•</span>
+                      <span className="text-yellow-300">Superseded</span>
+                    </>
+                  ) : null}
+                  {result.is_correction ? (
+                    <>
+                      <span>•</span>
+                      <span className="text-blue-300">Correction</span>
+                    </>
+                  ) : null}
+                </div>
+                <p className="text-sm text-gray-300">
+                  OJT Hours: {String(result.ojt_hours ?? 0)} | Requires Signoff:{' '}
+                  {result.requires_signoff ? 'Yes' : 'No'}
+                </p>
+                {result.notes ? (
+                  <p className="whitespace-pre-wrap text-sm text-gray-200">{result.notes}</p>
+                ) : null}
+                {(result.photo_urls ?? []).length > 0 ? (
+                  <div className="space-y-1">
+                    {(result.photo_urls ?? []).map((photoUrl) => (
+                      <p key={photoUrl} className="break-all text-sm text-blue-300">
+                        {photoUrl}
+                      </p>
+                    ))}
+                  </div>
+                ) : null}
+                {result.correction_reason ? (
+                  <p className="text-sm text-yellow-300">
+                    Correction reason: {result.correction_reason}
+                  </p>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       {isInspectionStage ? (
         <div className="rounded border border-gray-800 bg-gray-900 p-4 space-y-3">
           <h2 className="text-xl font-semibold">Post-Inspection Stage Selection</h2>
@@ -834,6 +1464,110 @@ export default function JobDetailPage() {
           </div>
         </div>
       ) : null}
+
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+        <section className="rounded border border-gray-800 bg-gray-900 p-4 space-y-4">
+          <div>
+            <h2 className="text-xl font-semibold">Internal Axis Notes</h2>
+            <p className="text-sm text-gray-400">
+              Private internal notes for Axis operators only.
+            </p>
+          </div>
+
+          {canEditJobs ? (
+            <div className="space-y-3">
+              <textarea
+                value={newInternalNote}
+                onChange={(event) => setNewInternalNote(event.target.value)}
+                placeholder="Add internal note"
+                className="min-h-[120px] w-full rounded border border-gray-700 bg-black px-3 py-2 text-white"
+              />
+
+              <button
+                type="button"
+                onClick={runAddInternalNote}
+                disabled={working}
+                className="rounded bg-zinc-700 px-4 py-2 text-white disabled:opacity-50"
+              >
+                {working ? 'Working...' : 'Add Internal Note'}
+              </button>
+            </div>
+          ) : (
+            <p className="text-sm text-gray-500">
+              `edit_jobs` permission is required to add internal notes.
+            </p>
+          )}
+
+          <div className="space-y-3">
+            {internalNotes.length === 0 ? (
+              <p className="text-sm text-gray-500">No internal notes recorded yet.</p>
+            ) : (
+              internalNotes.map((note) => (
+                <div
+                  key={note.note_id}
+                  className="rounded border border-gray-800 bg-black/30 p-3"
+                >
+                  <p className="whitespace-pre-wrap text-sm text-gray-200">{note.note_text}</p>
+                  <p className="mt-2 text-xs text-gray-400">
+                    {formatTimestamp(note.created_at)} | {note.created_by}
+                  </p>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+
+        <section className="rounded border border-gray-800 bg-gray-900 p-4 space-y-4">
+          <div>
+            <h2 className="text-xl font-semibold">Customer-Facing Notes</h2>
+            <p className="text-sm text-gray-400">
+              Separate publishable notes intended for customer visibility.
+            </p>
+          </div>
+
+          {canPublishCustomerNotes ? (
+            <div className="space-y-3">
+              <textarea
+                value={newCustomerNote}
+                onChange={(event) => setNewCustomerNote(event.target.value)}
+                placeholder="Add customer-facing note"
+                className="min-h-[120px] w-full rounded border border-gray-700 bg-black px-3 py-2 text-white"
+              />
+
+              <button
+                type="button"
+                onClick={runAddCustomerNote}
+                disabled={working}
+                className="rounded bg-blue-700 px-4 py-2 text-white disabled:opacity-50"
+              >
+                {working ? 'Working...' : 'Publish Customer Note'}
+              </button>
+            </div>
+          ) : (
+            <p className="text-sm text-gray-500">
+              `publish_customer_job_notes` permission is required to publish customer notes.
+            </p>
+          )}
+
+          <div className="space-y-3">
+            {customerNotes.length === 0 ? (
+              <p className="text-sm text-gray-500">No customer-facing notes recorded yet.</p>
+            ) : (
+              customerNotes.map((note) => (
+                <div
+                  key={note.note_id}
+                  className="rounded border border-gray-800 bg-black/30 p-3"
+                >
+                  <p className="whitespace-pre-wrap text-sm text-gray-200">{note.note_text}</p>
+                  <p className="mt-2 text-xs text-gray-400">
+                    {formatTimestamp(note.created_at)} | {note.created_by}
+                  </p>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+      </div>
 
       {!isInspectionStage && !isQcControlledStage && !isClosedStage ? (
         <div className="rounded border border-gray-800 bg-gray-900 p-4 space-y-3">
